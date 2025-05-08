@@ -26,7 +26,8 @@ def generate_report():
     return send_file(byte_io, as_attachment=True, download_name="SurveyReport.docx", mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 
 if __name__ == "__main__":
-import os
-port = int(os.environ.get('PORT', 5000))
-app.run(host='0.0.0.0', port=port, debug=True)
+    import os
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
+
 
