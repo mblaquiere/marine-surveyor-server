@@ -1,2 +1,2 @@
 Flask==2.1.0
-docxtpl==0.10.2
+docxtpl==0.10.5
