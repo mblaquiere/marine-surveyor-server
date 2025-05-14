@@ -12,7 +12,7 @@ def generate_report():
     data = request.json
 
     # Load the template
-    doc = DocxTemplate('survey_template_250507.docx')
+    doc = DocxTemplate('survey_template_test.docx')
 
     # Render the data into the template
     doc.render(data)
