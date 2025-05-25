@@ -13,7 +13,7 @@ def generate_report():
     data = request.json
 
     # Load the DOCX template
-    doc = DocxTemplate('survey_template_01a.docx')
+    doc = DocxTemplate('survey_template_with_photos.docx')
 
     # Start the template context with regular text fields only
     context = {k: v for k, v in data.items() if not k.endswith('_photo_path')}
