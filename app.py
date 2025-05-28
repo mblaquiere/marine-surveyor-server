@@ -4,8 +4,25 @@ from docxtpl import DocxTemplate, InlineImage
 from docx.shared import Inches
 import os
 from io import BytesIO
+from PIL import Image
 
 app = Flask(__name__)
+
+def resize_image_if_needed(path, max_width=1200):
+    try:
+        with Image.open(path) as img:
+            if img.width > max_width:
+                ratio = max_width / img.width
+                new_height = int(img.height * ratio)
+                resized = img.resize((max_width, new_height), Image.LANCZOS)
+
+                temp_path = path + "_resized.jpg"
+                resized.save(temp_path, format='JPEG', quality=85)
+                print(f"[🖼️] Resized {path} → {temp_path} ({max_width}x{new_height})")
+                return temp_path
+    except Exception as e:
+        print(f"[⚠️] Error resizing image {path}: {e}")
+    return path
 
 @app.route('/generate_report', methods=['POST'])
 def generate_report():
@@ -27,7 +44,8 @@ def generate_report():
     for key, path in data.items():
         if key.endswith('_photo_path') and isinstance(path, str) and os.path.exists(path):
             field_name = key.replace('_photo_path', '')
-            context[field_name] = InlineImage(doc, path, width=Inches(4.5))
+            resized_path = resize_image_if_needed(path)
+            context[field_name] = InlineImage(doc, resized_path, width=Inches(4.5))
 
     # Render the template with both text and images
     doc.render(context)
