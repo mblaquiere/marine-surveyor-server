@@ -18,7 +18,7 @@ def resize_image_if_needed(path, max_width=1200):
 
                 temp_path = path + "_resized.jpg"
                 resized.save(temp_path, format='JPEG', quality=85)
-                print(f"[🖼️] Resized {path} → {temp_path} ({max_width}x{new_height})")
+                print(f"[🖼️] Resized {path} → {temp_path} ({max_width}x{new_height})", flush=True)
                 return temp_path
     except Exception as e:
         print(f"[⚠️] Error resizing image {path}: {e}")
@@ -32,7 +32,7 @@ def generate_report():
     # 🔍 Diagnostic check for photo path existence
     for key, path in data.items():
         if key.endswith('_photo_path'):
-            print(f"[📸] {key} → {path} → Exists: {os.path.exists(path)}")
+            print(f"[📸] {key} → {path} → Exists: {os.path.exists(path)}", flush=True)
 
     # Load the DOCX template
     doc = DocxTemplate('survey_template_01a.docx')
