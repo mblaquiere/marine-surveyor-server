@@ -40,12 +40,15 @@ def generate_report():
     doc = DocxTemplate('survey_template_01a.docx')
 
     # Start the template context with regular text fields only
-    context = {k: v for k, v in data.items() if not k.endswith('_photo_path') and not k.endswith('_base64')}
+    context = {
+        k: v for k, v in data.items()
+        if not k.endswith('_photo_path') and not k.endswith('_base64')
+    }
 
     # Add photo fields from local paths like "engine_photo_path"
     for key, path in data.items():
         if key.endswith('_photo_path') and isinstance(path, str) and os.path.exists(path):
-            field_name = key.replace('_photo_path', '')
+            field_name = key.replace('_photo_path', '_photo')  # ✅ updated
             resized_path = resize_image_if_needed(path)
             context[field_name] = InlineImage(doc, resized_path, width=Inches(4.5))
 
@@ -58,7 +61,7 @@ def generate_report():
                     temp_file.write(image_bytes)
                     temp_path = temp_file.name
 
-                field_name = key.replace('_base64', '')
+                field_name = key.replace('_base64', '_photo')  # ✅ updated
                 context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
                 print(f"[🖼️] Decoded and inserted {key} → {temp_path}", flush=True)
             except Exception as e:
