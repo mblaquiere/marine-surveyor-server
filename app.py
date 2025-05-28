@@ -12,6 +12,11 @@ def generate_report():
     # Get JSON data from the request
     data = request.json
 
+    # 🔍 Diagnostic check for photo path existence
+    for key, path in data.items():
+        if key.endswith('_photo_path'):
+            print(f"[📸] {key} → {path} → Exists: {os.path.exists(path)}")
+
     # Load the DOCX template
     doc = DocxTemplate('survey_template_01a.docx')
 
