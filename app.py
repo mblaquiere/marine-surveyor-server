@@ -2,6 +2,7 @@ import json
 import os
 import base64
 import tempfile
+import subprocess
 from flask import Flask, request, send_file
 from docxtpl import DocxTemplate, InlineImage
 from docx.shared import Inches
@@ -28,8 +29,8 @@ def resize_image_if_needed(path, max_width=1200):
 
 @app.route('/generate_report', methods=['POST'])
 def generate_report():
-    # Get JSON data from the request
     data = request.json
+    requested_format = data.get("format", "docx").lower()
 
     # 🔍 Diagnostic check for local photo path existence
     for key, path in data.items():
@@ -70,18 +71,33 @@ def generate_report():
     # Render the template with both text and images
     doc.render(context)
 
-    # Save the generated file in memory
-    byte_io = BytesIO()
-    doc.save(byte_io)
-    byte_io.seek(0)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        docx_path = os.path.join(temp_dir, "report.docx")
+        doc.save(docx_path)
 
-    # Return the generated DOCX file
-    return send_file(
-        byte_io,
-        as_attachment=True,
-        download_name="SurveyReport.docx",
-        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    )
+        if requested_format == "pdf":
+            pdf_path = os.path.join(temp_dir, "report.pdf")
+            try:
+                subprocess.run(
+                    ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", temp_dir, docx_path],
+                    check=True
+                )
+                return send_file(
+                    pdf_path,
+                    as_attachment=True,
+                    download_name="SurveyReport.pdf",
+                    mimetype="application/pdf"
+                )
+            except subprocess.CalledProcessError as e:
+                return {"error": "Failed to convert DOCX to PDF", "details": str(e)}, 500
+
+        else:  # Default to returning DOCX
+            return send_file(
+                docx_path,
+                as_attachment=True,
+                download_name="SurveyReport.docx",
+                mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            )
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
