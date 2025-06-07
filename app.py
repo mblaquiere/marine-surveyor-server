@@ -75,21 +75,22 @@ def generate_report():
         docx_path = os.path.join(temp_dir, "report.docx")
         doc.save(docx_path)
 
-        if requested_format == "pdf":
-            pdf_path = os.path.join(temp_dir, "report.pdf")
-            try:
-                subprocess.run(
-                    ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", temp_dir, docx_path],
-                    check=True
-                )
-                return send_file(
-                    pdf_path,
-                    as_attachment=True,
-                    download_name="SurveyReport.pdf",
-                    mimetype="application/pdf"
-                )
-            except subprocess.CalledProcessError as e:
-                return {"error": "Failed to convert DOCX to PDF", "details": str(e)}, 500
+if requested_format == "pdf":
+    pdf_path = os.path.join(temp_dir, "report.pdf")
+    try:
+        subprocess.run(
+            ["pandoc", docx_path, "-o", pdf_path, "--pdf-engine=tectonic"],
+            check=True
+        )
+        return send_file(
+            pdf_path,
+            as_attachment=True,
+            download_name="SurveyReport.pdf",
+            mimetype="application/pdf"
+        )
+    except subprocess.CalledProcessError as e:
+        return {"error": "Pandoc conversion failed", "details": str(e)}, 500
+
 
         else:  # Default to returning DOCX
             return send_file(
