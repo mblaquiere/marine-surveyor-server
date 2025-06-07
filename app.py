@@ -50,7 +50,7 @@ def generate_report():
     # Add photo fields from local paths like "engine_photo_path"
     for key, path in data.items():
         if key.endswith('_photo_path') and isinstance(path, str) and os.path.exists(path):
-            field_name = key.replace('_photo_path', '_photo')  # ✅ updated
+            field_name = key.replace('_photo_path', '_photo')  # ✅ 
             resized_path = resize_image_if_needed(path)
             context[field_name] = InlineImage(doc, resized_path, width=Inches(4.5))
 
