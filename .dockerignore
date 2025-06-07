@@ -7,7 +7,6 @@ env/
 venv/
 .venv/
 *.db
-*.jpg
 *.jpeg
 *.png
 *.log
