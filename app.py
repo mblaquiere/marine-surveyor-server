@@ -100,6 +100,22 @@ if requested_format == "pdf":
                 mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             )
 
+@app.route('/check_pandoc')
+def check_pandoc():
+    try:
+        result = subprocess.run(["pandoc", "--version"], capture_output=True, text=True)
+        return {"output": result.stdout.strip()}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.route('/check_tectonic')
+def check_tectonic():
+    try:
+        result = subprocess.run(["tectonic", "--version"], capture_output=True, text=True)
+        return {"output": result.stdout.strip()}
+    except Exception as e:
+        return {"error": str(e)}
+
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
