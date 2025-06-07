@@ -80,7 +80,7 @@ def generate_report():
             pdf_path = os.path.join(temp_dir, "report.pdf")
             try:
                 subprocess.run(
-                    ["pandoc", docx_path, "-o", pdf_path],
+                    ["pandoc", docx_path, "-o", pdf_path, "--pdf-engine=tectonic"],
                     check=True
                 )
                 return send_file(
