@@ -11,6 +11,7 @@ from PIL import Image
 
 app = Flask(__name__)
 
+
 def resize_image_if_needed(path, max_width=1200):
     try:
         with Image.open(path) as img:
