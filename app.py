@@ -79,9 +79,11 @@ def generate_report():
         if requested_format == "pdf":
             pdf_path = os.path.join(temp_dir, "report.pdf")
             try:
-                subprocess.run(
+                result = subprocess.run(
                     ["pandoc", docx_path, "-o", pdf_path, "--pdf-engine=tectonic"],
-                    check=True
+                    check=True,
+                    capture_output=True,
+                    text=True
                 )
                 return send_file(
                     pdf_path,
@@ -90,7 +92,13 @@ def generate_report():
                     mimetype="application/pdf"
                 )
             except subprocess.CalledProcessError as e:
-                return {"error": "Pandoc conversion failed", "details": str(e)}, 500
+                return {
+                    "error": "Pandoc conversion failed",
+                    "returncode": e.returncode,
+                    "stdout": e.stdout,
+                    "stderr": e.stderr
+                }, 500
+
         else:
             return send_file(
                 docx_path,
