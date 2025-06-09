@@ -6,7 +6,6 @@ import subprocess
 from flask import Flask, request, send_file
 from docxtpl import DocxTemplate, InlineImage
 from docx.shared import Inches
-from io import BytesIO
 from PIL import Image
 
 app = Flask(__name__)
@@ -34,22 +33,17 @@ def generate_report():
     data = request.json
     requested_format = data.get("format", "docx").lower()
 
-    # Load template
     doc = DocxTemplate('survey_template_01a.docx')
-
-    # Start with text fields only
     context = {
         k: v for k, v in data.items()
         if not k.endswith('_photo_path') and not k.endswith('_base64')
     }
 
-    # Build a set of base keys like "engine_photo"
     image_keys = set()
     for key in data.keys():
         if key.endswith('_photo_path') or key.endswith('_base64'):
             image_keys.add(key.replace('_photo_path', '').replace('_base64', ''))
 
-    # Try base64 first, then fallback to file path
     for base in image_keys:
         field_name = base + '_photo'
 
@@ -61,7 +55,7 @@ def generate_report():
                     temp_path = temp_file.name
                 context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
                 print(f"[🖼️] {base}_base64 → inserted → {temp_path}", flush=True)
-                continue  # ✅ skip file path fallback if base64 succeeded
+                continue
             except Exception as e:
                 print(f"[⚠️] Error decoding {base}_base64: {e}", flush=True)
 
@@ -72,7 +66,6 @@ def generate_report():
                 context[field_name] = InlineImage(doc, resized_path, width=Inches(4.5))
                 print(f"[📷] {base}_photo_path used → {resized_path}", flush=True)
 
-    # Render and output
     doc.render(context)
 
     with tempfile.TemporaryDirectory() as temp_dir:
