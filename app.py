@@ -32,6 +32,9 @@ def resize_image_if_needed(path, max_width=1200):
 def generate_report():
     form = request.form.to_dict()
     files = request.files
+    # 🔍 Log all uploaded file field names and basic info
+    for name, file in files.items():
+        print(f"[📥] Received uploaded file: {name}, filename={file.filename}, content_type={file.content_type}", flush=True)
     requested_format = form.get("format", "docx").lower()
 
     doc = DocxTemplate('survey_template_01a.docx')
