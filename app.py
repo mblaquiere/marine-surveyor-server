@@ -30,42 +30,62 @@ def resize_image_if_needed(path, max_width=1200):
 
 @app.route('/generate_report', methods=['POST'])
 def generate_report():
-    data = request.json
-    requested_format = data.get("format", "docx").lower()
+    form = request.form.to_dict()
+    files = request.files
+    requested_format = form.get("format", "docx").lower()
 
     doc = DocxTemplate('survey_template_01a.docx')
+
+    # Text fields (exclude image fields)
     context = {
-        k: v for k, v in data.items()
-        if not k.endswith('_photo_path') and not k.endswith('_base64')
+        k: v for k, v in form.items()
+        if not k.endswith('_photo') and not k.endswith('_photo_path') and not k.endswith('_base64')
     }
 
+    # Identify all base image keys (like 'engine', 'vessel')
     image_keys = set()
-    for key in data.keys():
-        if key.endswith('_photo_path') or key.endswith('_base64'):
-            image_keys.add(key.replace('_photo_path', '').replace('_base64', ''))
+    for key in list(form.keys()) + list(files.keys()):
+        if key.endswith('_photo') or key.endswith('_photo_path') or key.endswith('_base64'):
+            image_keys.add(key.replace('_photo', '').replace('_photo_path', '').replace('_base64', ''))
 
     for base in image_keys:
         field_name = base + '_photo'
 
-        if f'{base}_base64' in data and isinstance(data[f'{base}_base64'], str):
+        # Priority 1: file upload
+        if field_name in files:
             try:
-                image_bytes = base64.b64decode(data[f'{base}_base64'])
+                image = files[field_name]
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+                    image.save(temp_file)
+                    temp_path = resize_image_if_needed(temp_file.name)
+                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
+                print(f"[📎] Uploaded file used for {field_name} → {temp_path}", flush=True)
+                continue
+            except Exception as e:
+                print(f"[⚠️] Error using uploaded file {field_name}: {e}", flush=True)
+
+        # Priority 2: base64 string (from form)
+        if f'{base}_base64' in form:
+            try:
+                image_bytes = base64.b64decode(form[f'{base}_base64'])
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
                     temp_file.write(image_bytes)
-                    temp_path = temp_file.name
+                    temp_path = resize_image_if_needed(temp_file.name)
                 context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
                 print(f"[🖼️] {base}_base64 → inserted → {temp_path}", flush=True)
                 continue
             except Exception as e:
-                print(f"[⚠️] Error decoding {base}_base64: {e}", flush=True)
+                print(f"[⚠️] Error decoding base64 {base}: {e}", flush=True)
 
-        if f'{base}_photo_path' in data:
-            path = data[f'{base}_photo_path']
-            if isinstance(path, str) and os.path.exists(path):
-                resized_path = resize_image_if_needed(path)
-                context[field_name] = InlineImage(doc, resized_path, width=Inches(4.5))
-                print(f"[📷] {base}_photo_path used → {resized_path}", flush=True)
+        # Priority 3: file path (should be rare now)
+        if f'{base}_photo_path' in form:
+            path = form[f'{base}_photo_path']
+            if os.path.exists(path):
+                temp_path = resize_image_if_needed(path)
+                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
+                print(f"[📷] {base}_photo_path used → {temp_path}", flush=True)
 
+    # Render and output
     doc.render(context)
 
     with tempfile.TemporaryDirectory() as temp_dir:
