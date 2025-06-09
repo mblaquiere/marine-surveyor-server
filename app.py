@@ -53,6 +53,9 @@ def generate_report():
         if key.endswith('_photo_path') and isinstance(path, str) and os.path.exists(path):
             field_name = key.replace('_photo_path', '_photo')
             resized_path = resize_image_if_needed(path)
+            
+            print(f"[📎] Inserting image for {field_name} from {resized_path}", flush=True)
+            
             context[field_name] = InlineImage(doc, resized_path, width=Inches(4.5))
 
     # Add photo fields from Base64-encoded strings
