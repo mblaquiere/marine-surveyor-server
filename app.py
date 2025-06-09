@@ -34,46 +34,45 @@ def generate_report():
     data = request.json
     requested_format = data.get("format", "docx").lower()
 
-    # 🔍 Diagnostic check for local photo path existence
-    for key, path in data.items():
-        if key.endswith('_photo_path'):
-            print(f"[📸] {key} → {path} → Exists: {os.path.exists(path)}", flush=True)
-
-    # Load the DOCX template
+    # Load template
     doc = DocxTemplate('survey_template_01a.docx')
 
-    # Start the template context with regular text fields only
+    # Start with text fields only
     context = {
         k: v for k, v in data.items()
-        if k != 'vessel_photo' and not k.endswith('_photo_path') and not k.endswith('_base64')
+        if not k.endswith('_photo_path') and not k.endswith('_base64')
     }
 
-    # Add photo fields from local paths like "engine_photo_path"
-    for key, path in data.items():
-        if key.endswith('_photo_path') and isinstance(path, str) and os.path.exists(path):
-            field_name = key.replace('_photo_path', '_photo')
-            resized_path = resize_image_if_needed(path)
-            
-            print(f"[📎] Inserting image for {field_name} from {resized_path}", flush=True)
-            
-            context[field_name] = InlineImage(doc, resized_path, width=Inches(4.5))
+    # Build a set of base keys like "engine_photo"
+    image_keys = set()
+    for key in data.keys():
+        if key.endswith('_photo_path') or key.endswith('_base64'):
+            image_keys.add(key.replace('_photo_path', '').replace('_base64', ''))
 
-    # Add photo fields from Base64-encoded strings
-    for key, b64string in data.items():
-        if key.endswith('_base64') and isinstance(b64string, str):
+    # Try base64 first, then fallback to file path
+    for base in image_keys:
+        field_name = base + '_photo'
+
+        if f'{base}_base64' in data and isinstance(data[f'{base}_base64'], str):
             try:
-                image_bytes = base64.b64decode(b64string)
+                image_bytes = base64.b64decode(data[f'{base}_base64'])
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
                     temp_file.write(image_bytes)
                     temp_path = temp_file.name
-
-                field_name = key.replace('_base64', '_photo')
                 context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
-                print(f"[🖼️] Decoded and inserted {key} → {temp_path}", flush=True)
+                print(f"[🖼️] {base}_base64 → inserted → {temp_path}", flush=True)
+                continue  # ✅ skip file path fallback if base64 succeeded
             except Exception as e:
-                print(f"[⚠️] Error decoding image {key}: {e}", flush=True)
+                print(f"[⚠️] Error decoding {base}_base64: {e}", flush=True)
 
-    # Render the template with both text and images
+        if f'{base}_photo_path' in data:
+            path = data[f'{base}_photo_path']
+            if isinstance(path, str) and os.path.exists(path):
+                resized_path = resize_image_if_needed(path)
+                context[field_name] = InlineImage(doc, resized_path, width=Inches(4.5))
+                print(f"[📷] {base}_photo_path used → {resized_path}", flush=True)
+
+    # Render and output
     doc.render(context)
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -83,7 +82,7 @@ def generate_report():
         if requested_format == "pdf":
             pdf_path = os.path.join(temp_dir, "report.pdf")
             try:
-                result = subprocess.run(
+                subprocess.run(
                     ["pandoc", docx_path, "-o", pdf_path, "--pdf-engine=tectonic"],
                     check=True,
                     capture_output=True,
@@ -102,13 +101,13 @@ def generate_report():
                     "stdout": e.stdout,
                     "stderr": e.stderr
                 }, 500
-        else:
-            return send_file(
-                docx_path,
-                as_attachment=True,
-                download_name="SurveyReport.docx",
-                mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            )
+
+        return send_file(
+            docx_path,
+            as_attachment=True,
+            download_name="SurveyReport.docx",
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        )
 
 
 @app.route('/check_pandoc')
