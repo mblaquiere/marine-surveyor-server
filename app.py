@@ -28,6 +28,7 @@ def resize_image_if_needed(path, max_width=1200):
         print(f"[⚠️] Error resizing image {path}: {e}", flush=True)
     return path
 
+
 @app.route('/generate_report', methods=['POST'])
 def generate_report():
     data = request.json
@@ -44,13 +45,13 @@ def generate_report():
     # Start the template context with regular text fields only
     context = {
         k: v for k, v in data.items()
-        if not k.endswith('_photo_path') and not k.endswith('_base64')
+        if k != 'vessel_photo' and not k.endswith('_photo_path') and not k.endswith('_base64')
     }
 
     # Add photo fields from local paths like "engine_photo_path"
     for key, path in data.items():
         if key.endswith('_photo_path') and isinstance(path, str) and os.path.exists(path):
-            field_name = key.replace('_photo_path', '_photo')  # ✅ 
+            field_name = key.replace('_photo_path', '_photo')
             resized_path = resize_image_if_needed(path)
             context[field_name] = InlineImage(doc, resized_path, width=Inches(4.5))
 
@@ -63,7 +64,7 @@ def generate_report():
                     temp_file.write(image_bytes)
                     temp_path = temp_file.name
 
-                field_name = key.replace('_base64', '_photo')  # ✅ updated
+                field_name = key.replace('_base64', '_photo')
                 context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
                 print(f"[🖼️] Decoded and inserted {key} → {temp_path}", flush=True)
             except Exception as e:
@@ -98,7 +99,6 @@ def generate_report():
                     "stdout": e.stdout,
                     "stderr": e.stderr
                 }, 500
-
         else:
             return send_file(
                 docx_path,
@@ -116,6 +116,7 @@ def check_pandoc():
     except Exception as e:
         return {"error": str(e)}
 
+
 @app.route('/check_tectonic')
 def check_tectonic():
     try:
@@ -123,6 +124,7 @@ def check_tectonic():
         return {"output": result.stdout.strip()}
     except Exception as e:
         return {"error": str(e)}
+
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
