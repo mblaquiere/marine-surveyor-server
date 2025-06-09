@@ -1,9 +1,15 @@
 FROM python:3.11-slim
 
-# Install system dependencies
+# Install system dependencies, including font support
 RUN apt-get update && \
-    apt-get install -y curl pandoc xz-utils ca-certificates && \
-    apt-get clean
+    apt-get install -y \
+        curl \
+        pandoc \
+        xz-utils \
+        ca-certificates \
+        fontconfig \
+        fonts-dejavu \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Tectonic v0.13.0 (pinned, stable)
 RUN curl -L -o tectonic.tar.gz https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.13.0/tectonic-0.13.0-x86_64-unknown-linux-musl.tar.gz && \
@@ -14,6 +20,10 @@ RUN curl -L -o tectonic.tar.gz https://github.com/tectonic-typesetting/tectonic/
 
 # Confirm it installed (optional)
 RUN tectonic --version || echo "Tectonic install failed"
+
+# OPTIONAL: Explicitly set fontconfig environment path
+ENV FONTCONFIG_PATH=/etc/fonts
+ENV FONTCONFIG_FILE=fonts.conf
 
 WORKDIR /app
 COPY . /app
