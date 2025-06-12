@@ -59,7 +59,7 @@ def generate_report():
         
         # Priority 1: file upload
         if field_name in files:
-        print(f"[📁] Found file in request.files: {field_name}", flush=True)
+            print(f"[📁] Found file in request.files: {field_name}", flush=True)
             try:
                 image = files[field_name]
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
