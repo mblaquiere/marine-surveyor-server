@@ -55,9 +55,11 @@ def generate_report():
 
     for base in image_keys:
         field_name = base + '_photo'
-
+        print(f"[🔄] Evaluating field: {field_name}", flush=True)
+        
         # Priority 1: file upload
         if field_name in files:
+        print(f"[📁] Found file in request.files: {field_name}", flush=True)
             try:
                 image = files[field_name]
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
