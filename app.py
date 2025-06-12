@@ -68,7 +68,7 @@ def generate_report():
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
                     image.save(temp_file)
                     temp_path = resize_image_if_needed(temp_file.name)
-                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
+                context[base + '_photo'] = InlineImage(doc, temp_path, width=Inches(4.5))
                 print(f"[📎] Uploaded file used for {field_name} → {temp_path}", flush=True)
                 continue
             except Exception as e:
