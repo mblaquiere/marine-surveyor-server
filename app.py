@@ -51,6 +51,8 @@ def generate_report():
         if key.endswith('_photo') or key.endswith('_photo_path') or key.endswith('_base64'):
             image_keys.add(key.replace('_photo', '').replace('_photo_path', '').replace('_base64', ''))
 
+    print(f"[🔎] Found image_keys: {image_keys}", flush=True)
+
     for base in image_keys:
         field_name = base + '_photo'
 
