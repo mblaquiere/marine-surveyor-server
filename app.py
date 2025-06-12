@@ -54,12 +54,9 @@ def generate_report():
     print(f"[🔎] Found image_keys: {image_keys}", flush=True)
 
     for base in image_keys:
-        field_name = (
-            base + '_photo_photo' if base == 'vessel' else base + '_photo'
-        )
-
+        field_name = base + '_photo'
         print(f"[🔄] Evaluating field: {field_name}", flush=True)
-        
+
         # Priority 1: file upload
         if field_name in files:
             print(f"[📁] Found file in request.files: {field_name}", flush=True)
@@ -68,7 +65,7 @@ def generate_report():
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
                     image.save(temp_file)
                     temp_path = resize_image_if_needed(temp_file.name)
-                context[base + '_photo'] = InlineImage(doc, temp_path, width=Inches(4.5))
+                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
                 print(f"[📎] Uploaded file used for {field_name} → {temp_path}", flush=True)
                 continue
             except Exception as e:
@@ -81,7 +78,7 @@ def generate_report():
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
                     temp_file.write(image_bytes)
                     temp_path = resize_image_if_needed(temp_file.name)
-                context[base + '_photo'] = InlineImage(doc, temp_path, width=Inches(4.5))
+                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
                 print(f"[🖼️] {base}_base64 → inserted → {temp_path}", flush=True)
                 continue
             except Exception as e:
@@ -92,7 +89,7 @@ def generate_report():
             path = form[f'{base}_photo_path']
             if os.path.exists(path):
                 temp_path = resize_image_if_needed(path)
-                context[base + '_photo'] = InlineImage(doc, temp_path, width=Inches(4.5))
+                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
                 print(f"[📷] {base}_photo_path used → {temp_path}", flush=True)
 
     # Render and output
