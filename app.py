@@ -54,7 +54,10 @@ def generate_report():
     print(f"[🔎] Found image_keys: {image_keys}", flush=True)
 
     for base in image_keys:
-        field_name = base + '_photo'
+        field_name = (
+            base + '_photo_photo' if base == 'vessel' else base + '_photo'
+        )
+
         print(f"[🔄] Evaluating field: {field_name}", flush=True)
         
         # Priority 1: file upload
