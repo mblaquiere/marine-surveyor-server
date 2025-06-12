@@ -81,7 +81,7 @@ def generate_report():
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
                     temp_file.write(image_bytes)
                     temp_path = resize_image_if_needed(temp_file.name)
-                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
+                context[base + '_photo'] = InlineImage(doc, temp_path, width=Inches(4.5))
                 print(f"[🖼️] {base}_base64 → inserted → {temp_path}", flush=True)
                 continue
             except Exception as e:
@@ -92,7 +92,7 @@ def generate_report():
             path = form[f'{base}_photo_path']
             if os.path.exists(path):
                 temp_path = resize_image_if_needed(path)
-                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
+                context[base + '_photo'] = InlineImage(doc, temp_path, width=Inches(4.5))
                 print(f"[📷] {base}_photo_path used → {temp_path}", flush=True)
 
     # Render and output
