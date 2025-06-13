@@ -32,20 +32,19 @@ def resize_image_if_needed(path, max_width=1200):
 def generate_report():
     form = request.form.to_dict()
     files = request.files
-    # 🔍 Log all uploaded file field names and basic info
     for name, file in files.items():
         print(f"[📥] Received uploaded file: {name}, filename={file.filename}, content_type={file.content_type}", flush=True)
-    requested_format = form.get("format", "docx").lower()
 
+    requested_format = form.get("format", "docx").lower()
     doc = DocxTemplate('survey_template_01a.docx')
 
-    # Text fields (exclude image fields)
+    # Load text fields into context
     context = {
         k: v for k, v in form.items()
         if not k.endswith('_photo') and not k.endswith('_photo_path') and not k.endswith('_base64')
     }
 
-    # Identify all base image keys (like 'engine', 'vessel')
+    # Detect image keys
     image_keys = set()
     for key in list(form.keys()) + list(files.keys()):
         if key.endswith('_photo') or key.endswith('_photo_path') or key.endswith('_base64'):
@@ -57,7 +56,6 @@ def generate_report():
         field_name = base + '_photo'
         print(f"[🔄] Evaluating field: {field_name}", flush=True)
 
-        # Priority 1: file upload
         if field_name in files:
             print(f"[📁] Found file in request.files: {field_name}", flush=True)
             try:
@@ -71,7 +69,6 @@ def generate_report():
             except Exception as e:
                 print(f"[⚠️] Error using uploaded file {field_name}: {e}", flush=True)
 
-        # Priority 2: base64 string (from form)
         if f'{base}_base64' in form:
             try:
                 image_bytes = base64.b64decode(form[f'{base}_base64'])
@@ -84,7 +81,6 @@ def generate_report():
             except Exception as e:
                 print(f"[⚠️] Error decoding base64 {base}: {e}", flush=True)
 
-        # Priority 3: file path (should be rare now)
         if f'{base}_photo_path' in form:
             path = form[f'{base}_photo_path']
             if os.path.exists(path):
@@ -92,7 +88,6 @@ def generate_report():
                 context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
                 print(f"[📷] {base}_photo_path used → {temp_path}", flush=True)
 
-    # Render and output
     doc.render(context)
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -112,7 +107,7 @@ def generate_report():
                 print("[📄] Pandoc TEX stdout:\n", pandoc_result.stdout, flush=True)
                 print("[⚠️] Pandoc TEX stderr:\n", pandoc_result.stderr, flush=True)
                 if pandoc_result.returncode != 0:
-                    raise Exception(f"Pandoc failed to produce TEX")
+                    raise Exception("Pandoc failed to produce TEX")
 
                 # TEX → PDF using tectonic
                 tectonic_result = subprocess.run(
@@ -123,7 +118,7 @@ def generate_report():
                 print("[📄] Tectonic stdout:\n", tectonic_result.stdout, flush=True)
                 print("[⚠️] Tectonic stderr:\n", tectonic_result.stderr, flush=True)
                 if tectonic_result.returncode != 0:
-                    raise Exception(f"Tectonic failed to produce PDF")
+                    raise Exception("Tectonic failed to produce PDF")
 
                 return send_file(
                     pdf_path,
@@ -131,24 +126,11 @@ def generate_report():
                     download_name="SurveyReport.pdf",
                     mimetype="application/pdf"
                 )
+
             except Exception as e:
                 return {
                     "error": "PDF conversion failed",
                     "message": str(e)
-                }, 500
-
-                return send_file(
-                    pdf_path,
-                    as_attachment=True,
-                    download_name="SurveyReport.pdf",
-                    mimetype="application/pdf"
-                )
-            except subprocess.CalledProcessError as e:
-                return {
-                    "error": "Pandoc conversion failed",
-                    "returncode": e.returncode,
-                    "stdout": e.stdout,
-                    "stderr": e.stderr
                 }, 500
 
         return send_file(
