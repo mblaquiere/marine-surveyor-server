@@ -38,13 +38,11 @@ def generate_report():
     requested_format = form.get("format", "docx").lower()
     doc = DocxTemplate('survey_template_01a.docx')
 
-    # Load text fields into context
     context = {
         k: v for k, v in form.items()
         if not k.endswith('_photo') and not k.endswith('_photo_path') and not k.endswith('_base64')
     }
 
-    # Detect image keys
     image_keys = set()
     for key in list(form.keys()) + list(files.keys()):
         if key.endswith('_photo') or key.endswith('_photo_path') or key.endswith('_base64'):
@@ -96,29 +94,24 @@ def generate_report():
 
         if requested_format == "pdf":
             pdf_path = os.path.join(temp_dir, "report.pdf")
-            tex_path = os.path.join(temp_dir, "report.tex")
             try:
-                # DOCX → TEX
-                pandoc_result = subprocess.run(
-                    ["pandoc", docx_path, "-o", tex_path],
+                result = subprocess.run(
+                    [
+                        "libreoffice",
+                        "--headless",
+                        "--convert-to", "pdf",
+                        "--outdir", temp_dir,
+                        docx_path
+                    ],
                     capture_output=True,
                     text=True
                 )
-                print("[📄] Pandoc TEX stdout:\n", pandoc_result.stdout, flush=True)
-                print("[⚠️] Pandoc TEX stderr:\n", pandoc_result.stderr, flush=True)
-                if pandoc_result.returncode != 0:
-                    raise Exception("Pandoc failed to produce TEX")
 
-                # TEX → PDF using tectonic
-                tectonic_result = subprocess.run(
-                    ["tectonic", tex_path, "--outdir", temp_dir],
-                    capture_output=True,
-                    text=True
-                )
-                print("[📄] Tectonic stdout:\n", tectonic_result.stdout, flush=True)
-                print("[⚠️] Tectonic stderr:\n", tectonic_result.stderr, flush=True)
-                if tectonic_result.returncode != 0:
-                    raise Exception("Tectonic failed to produce PDF")
+                print("[📄] LibreOffice stdout:\n", result.stdout, flush=True)
+                print("[⚠️] LibreOffice stderr:\n", result.stderr, flush=True)
+
+                if result.returncode != 0 or not os.path.exists(pdf_path):
+                    raise Exception("LibreOffice failed to produce PDF")
 
                 return send_file(
                     pdf_path,
