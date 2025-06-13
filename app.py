@@ -101,28 +101,41 @@ def generate_report():
 
         if requested_format == "pdf":
             pdf_path = os.path.join(temp_dir, "report.pdf")
+            tex_path = os.path.join(temp_dir, "report.tex")
             try:
-                result = subprocess.run(
-                    [
-                        "pandoc", docx_path, "-o", pdf_path,
-                        "--pdf-engine=tectonic",
-                        "--verbose",
-                        "--pdf-engine-opt=-interaction=nonstopmode"
-                    ],
+                # DOCX → TEX
+                pandoc_result = subprocess.run(
+                    ["pandoc", docx_path, "-o", tex_path],
                     capture_output=True,
                     text=True
                 )
+                print("[📄] Pandoc TEX stdout:\n", pandoc_result.stdout, flush=True)
+                print("[⚠️] Pandoc TEX stderr:\n", pandoc_result.stderr, flush=True)
+                if pandoc_result.returncode != 0:
+                    raise Exception(f"Pandoc failed to produce TEX")
 
-                print("[📄] Pandoc stdout:\n", result.stdout, flush=True)
-                print("[⚠️] Pandoc stderr:\n", result.stderr, flush=True)
+                # TEX → PDF using tectonic
+                tectonic_result = subprocess.run(
+                    ["tectonic", tex_path, "--outdir", temp_dir],
+                    capture_output=True,
+                    text=True
+                )
+                print("[📄] Tectonic stdout:\n", tectonic_result.stdout, flush=True)
+                print("[⚠️] Tectonic stderr:\n", tectonic_result.stderr, flush=True)
+                if tectonic_result.returncode != 0:
+                    raise Exception(f"Tectonic failed to produce PDF")
 
-                if result.returncode != 0:
-                    return {
-                        "error": "Pandoc conversion failed",
-                        "returncode": result.returncode,
-                        "stdout": result.stdout,
-                        "stderr": result.stderr
-                    }, 500
+                return send_file(
+                    pdf_path,
+                    as_attachment=True,
+                    download_name="SurveyReport.pdf",
+                    mimetype="application/pdf"
+                )
+            except Exception as e:
+                return {
+                    "error": "PDF conversion failed",
+                    "message": str(e)
+                }, 500
 
                 return send_file(
                     pdf_path,
