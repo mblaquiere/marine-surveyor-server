@@ -5,10 +5,18 @@ import tempfile
 import subprocess
 from flask import Flask, request, send_file
 from docxtpl import DocxTemplate, InlineImage
+from jinja2 import Environment
 from docx.shared import Inches
 from PIL import Image
 
 app = Flask(__name__)
+# ---- Custom filters ----
+def nl2br(value):
+    """Convert newlines into Word line breaks for docxtpl."""
+    if not value:
+        return ""
+    return value.replace("\n", "<w:br/>")
+# ------------------------
 
 
 def resize_image_if_needed(path, max_width=1200):
@@ -21,10 +29,9 @@ def resize_image_if_needed(path, max_width=1200):
 
                 temp_path = path + "_resized.jpg"
                 resized.save(temp_path, format='JPEG', quality=85)
-                print(f"[🖼️] Resized {path} → {temp_path} ({max_width}x{new_height})", flush=True)
                 return temp_path
     except Exception as e:
-        print(f"[⚠️] Error resizing image {path}: {e}", flush=True)
+        print(f"[⚠️] Image resize failed for {path}: {e}", flush=True)
     return path
 
 
@@ -33,7 +40,7 @@ def generate_report():
     form = request.form.to_dict()
     files = request.files
     for name, file in files.items():
-        print(f"[📥] Received uploaded file: {name}, filename={file.filename}, content_type={file.content_type}", flush=True)
+        print(f"[📥] Received uploaded file: {name}, filenam...={file.filename}, content_type={file.content_type}", flush=True)
 
     requested_format = form.get("format", "docx").lower()
     doc = DocxTemplate('survey_template_01a.docx')
@@ -55,42 +62,45 @@ def generate_report():
         print(f"[🔄] Evaluating field: {field_name}", flush=True)
 
         if field_name in files:
-            print(f"[📁] Found file in request.files: {field_name}", flush=True)
-            try:
-                image = files[field_name]
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
-                    image.save(temp_file)
-                    temp_path = resize_image_if_needed(temp_file.name)
-                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
-                print(f"[📎] Uploaded file used for {field_name} → {temp_path}", flush=True)
-                continue
-            except Exception as e:
-                print(f"[⚠️] Error using uploaded file {field_name}: {e}", flush=True)
+            print(f"[🖼️] Using uploaded file for {field_name}", flush=True)
+            file = files[field_name]
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
+                file.save(tmp.name)
+                temp_path = tmp.name
 
-        if f'{base}_base64' in form:
-            try:
-                image_bytes = base64.b64decode(form[f'{base}_base64'])
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
-                    temp_file.write(image_bytes)
-                    temp_path = resize_image_if_needed(temp_file.name)
-                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
-                print(f"[🖼️] {base}_base64 → inserted → {temp_path}", flush=True)
-                continue
-            except Exception as e:
-                print(f"[⚠️] Error decoding base64 {base}: {e}", flush=True)
+            temp_path = resize_image_if_needed(temp_path)
+            context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
 
-        if f'{base}_photo_path' in form:
-            path = form[f'{base}_photo_path']
+        elif base + '_photo_path' in form:
+            path = form[base + '_photo_path']
+            print(f"[📄] Using on-disk path for {field_name}: {path}", flush=True)
             if os.path.exists(path):
-                temp_path = resize_image_if_needed(path)
-                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
-                print(f"[📷] {base}_photo_path used → {temp_path}", flush=True)
+                path = resize_image_if_needed(path)
+                context[field_name] = InlineImage(doc, path, width=Inches(4.5))
+            else:
+                print(f"[⚠️] Provided path does not exist: {path}", flush=True)
 
-    doc.render(context)
+        elif base + '_base64' in form:
+            print(f"[🧬] Decoding base64 for {field_name}", flush=True)
+            try:
+                data = base64.b64decode(form[base + '_base64'])
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                    tmp.write(data)
+                    temp_path = tmp.name
+                temp_path = resize_image_if_needed(temp_path)
+                context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
+            except Exception as e:
+                print(f"[⚠️] Failed to decode base64 for {field_name}: {e}", flush=True)
+
+    # Attach Jinja environment with our custom nl2br filter
+    env = Environment(autoescape=True)
+    env.filters["nl2br"] = nl2br
+    doc.render(context, jinja_env=env)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         docx_path = os.path.join(temp_dir, "report.docx")
         doc.save(docx_path)
+        print(f"[💾] DOCX saved to: {docx_path}", flush=True)
 
         if requested_format == "pdf":
             pdf_path = os.path.join(temp_dir, "report.pdf")
@@ -110,37 +120,24 @@ def generate_report():
                 print("[📄] LibreOffice stdout:\n", result.stdout, flush=True)
                 print("[⚠️] LibreOffice stderr:\n", result.stderr, flush=True)
 
-                if result.returncode != 0 or not os.path.exists(pdf_path):
-                    raise Exception("LibreOffice failed to produce PDF")
+                if result.returncode != 0:
+                    raise RuntimeError(f"LibreOffice conversion failed: {result.stderr}")
 
-                return send_file(
-                    pdf_path,
-                    as_attachment=True,
-                    download_name="SurveyReport.pdf",
-                    mimetype="application/pdf"
-                )
+                if not os.path.exists(pdf_path):
+                    raise FileNotFoundError(f"Expected PDF not found at {pdf_path}")
 
+                print(f"[✅] PDF generated: {pdf_path}", flush=True)
+                return send_file(pdf_path, as_attachment=True, download_name="report.pdf")
             except Exception as e:
-                return {
-                    "error": "PDF conversion failed",
-                    "message": str(e)
-                }, 500
+                print(f"[❌] PDF generation failed: {e}. Falling back to DOCX.", flush=True)
+                return send_file(docx_path, as_attachment=True, download_name="report.docx")
 
-        return send_file(
-            docx_path,
-            as_attachment=True,
-            download_name="SurveyReport.docx",
-            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        )
+        return send_file(docx_path, as_attachment=True, download_name="report.docx")
 
 
-@app.route('/check_pandoc')
-def check_pandoc():
-    try:
-        result = subprocess.run(["pandoc", "--version"], capture_output=True, text=True)
-        return {"output": result.stdout.strip()}
-    except Exception as e:
-        return {"error": str(e)}
+@app.route('/health')
+def health():
+    return {"status": "ok"}
 
 
 @app.route('/check_tectonic')
