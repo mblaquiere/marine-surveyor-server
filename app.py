@@ -11,12 +11,26 @@ from PIL import Image
 
 app = Flask(__name__)
 # ---- Custom filters ----
+# ---- Custom filters ----
 def nl2br(value):
-    """Convert newlines into Word line breaks for docxtpl."""
-    if not value:
+    """Convert newlines into Word line breaks as a RichText for docxtpl."""
+    if value is None:
         return ""
-    return value.replace("\n", "<w:br/>")
+
+    from docxtpl import RichText  # local import to avoid circulars on some setups
+
+    text = str(value)
+    parts = text.split('\n')
+
+    rt = RichText()
+    for i, part in enumerate(parts):
+      rt.add(part)            # add the line text
+      if i < len(parts) - 1:
+        rt.add('\n')          # adds an actual Word line break between lines
+
+    return rt
 # ------------------------
+
 
 
 def resize_image_if_needed(path, max_width=1200):
