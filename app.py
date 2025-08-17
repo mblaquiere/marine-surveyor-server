@@ -119,17 +119,19 @@ def generate_report():
             except Exception as e:
                 print(f"[⚠️] Failed to decode base64 for {field_name}: {e}", flush=True)
 
-    # Build arrays for severity loops in the template
-    for sev in ("aa", "a", "b", "c"):
+    # Build arrays for severity loops in the template (incl. FTR)
+    for sev in ("aa", "a", "b", "c", "ftr"):
         key = f"{sev}_findings"
         context[f"{sev}_findings_list"] = _split_to_lines(context.get(key))
 
-    # Debug: verify counts
+    # Debug: verify counts incl. FTR
     print("[lists] aa:", len(context.get("aa_findings_list", [])),
           "a:", len(context.get("a_findings_list", [])),
           "b:", len(context.get("b_findings_list", [])),
           "c:", len(context.get("c_findings_list", [])),
+          "ftr:", len(context.get("ftr_findings_list", [])),
           flush=True)
+
 
     # Jinja environment (nl2br available for other fields if you want)
     env = Environment(autoescape=True)
