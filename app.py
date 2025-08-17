@@ -1,5 +1,6 @@
 import json
 import os
+import io
 import base64
 import tempfile
 import subprocess
@@ -170,13 +171,31 @@ def generate_report():
                 if not os.path.exists(pdf_path):
                     raise FileNotFoundError(f"Expected PDF not found at {pdf_path}")
 
+                # 🔐 Read into memory BEFORE leaving the temp_dir context
+                with open(pdf_path, "rb") as f:
+                    pdf_bytes = f.read()
+
                 print(f"[✅] PDF generated: {pdf_path}", flush=True)
-                return send_file(pdf_path, as_attachment=True, download_name="report.pdf")
+                return send_file(
+                    io.BytesIO(pdf_bytes),
+                    as_attachment=True,
+                    download_name="report.pdf",
+                    mimetype="application/pdf",
+                )
             except Exception as e:
                 print(f"[❌] PDF generation failed: {e}. Falling back to DOCX.", flush=True)
-                return send_file(docx_path, as_attachment=True, download_name="report.docx")
+                # fall through to DOCX return below
 
-        return send_file(docx_path, as_attachment=True, download_name="report.docx")
+        # Default/Docx return path (or PDF fallback)
+        with open(docx_path, "rb") as f:
+            docx_bytes = f.read()
+
+        return send_file(
+            io.BytesIO(docx_bytes),
+            as_attachment=True,
+            download_name="report.docx",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
 
 @app.route('/health')
