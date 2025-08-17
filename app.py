@@ -31,6 +31,30 @@ def nl2br(value):
     return rt
 # ------------------------
 
+def lines_to_subdoc(doc, value):
+    """
+    Turn a newline-separated string into a Subdoc where each line is its own paragraph.
+    If value is empty/None, inserts 'None Observed'.
+    """
+    text = "" if value is None else str(value)
+    lines = [l for l in text.split('\n')]
+
+    sub = doc.new_subdoc()
+
+    # If there are no non-empty lines, write a friendly default
+    if not any(l.strip() for l in lines):
+        sub.add_paragraph("None Observed")
+        return sub
+
+    for l in lines:
+        # Preserve blank lines as empty paragraphs for readability
+        if l.strip():
+            sub.add_paragraph(l)
+        else:
+            sub.add_paragraph("")  # empty paragraph
+
+    return sub
+
 
 
 def resize_image_if_needed(path, max_width=1200):
@@ -105,6 +129,12 @@ def generate_report():
                 context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
             except Exception as e:
                 print(f"[⚠️] Failed to decode base64 for {field_name}: {e}", flush=True)
+
+# Convert severity blocks (already numbered in Dart) into multi-paragraph Subdocs
+for sev_key in ["aa_findings", "a_findings", "b_findings", "c_findings"]:
+    if sev_key in context:
+        context[sev_key] = lines_to_subdoc(doc, context[sev_key])
+
 
     # Attach Jinja environment with our custom nl2br filter
     env = Environment(autoescape=True)
