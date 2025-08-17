@@ -10,24 +10,20 @@ from docx.shared import Inches
 from PIL import Image
 
 app = Flask(__name__)
-# ---- Custom filters ----
+
 # ---- Custom filters ----
 def nl2br(value):
-    """Convert newlines into Word line breaks as a RichText for docxtpl."""
+    """Convert newlines into Word line breaks for docxtpl (kept for optional use)."""
     if value is None:
         return ""
-
-    from docxtpl import RichText  # local import to avoid circulars on some setups
-
+    from docxtpl import RichText  # local import to avoid issues on some envs
     text = str(value)
     parts = text.split('\n')
-
     rt = RichText()
     for i, part in enumerate(parts):
-      rt.add(part)            # add the line text
-      if i < len(parts) - 1:
-        rt.add('\n')          # adds an actual Word line break between lines
-
+        rt.add(part)
+        if i < len(parts) - 1:
+            rt.add('\n')  # real Word line break
     return rt
 # ------------------------
 
@@ -56,7 +52,6 @@ def lines_to_subdoc(doc, value):
     return sub
 
 
-
 def resize_image_if_needed(path, max_width=1200):
     try:
         with Image.open(path) as img:
@@ -77,24 +72,31 @@ def resize_image_if_needed(path, max_width=1200):
 def generate_report():
     form = request.form.to_dict()
     files = request.files
+
     for name, file in files.items():
-        print(f"[📥] Received uploaded file: {name}, filenam...={file.filename}, content_type={file.content_type}", flush=True)
+        print(f"[📥] Received uploaded file: {name}, filename={file.filename}, content_type={file.content_type}", flush=True)
 
     requested_format = form.get("format", "docx").lower()
-    doc = DocxTemplate('survey_template_01a.docx')
+    template_name = form.get("template", "survey_template_01a.docx")
 
+    doc = DocxTemplate(template_name)
+
+    # Base context: all non-file, non-photo-path fields
     context = {
         k: v for k, v in form.items()
-        if not k.endswith('_photo') and not k.endswith('_photo_path') and not k.endswith('_base64')
+        if not k.endswith('_photo') and not k.endswith('_photo_path') and not k.endswith('_base64') and k != 'template' and k != 'format'
     }
 
+    # Resolve image keys from any of *_photo, *_photo_path, *_base64
     image_keys = set()
     for key in list(form.keys()) + list(files.keys()):
         if key.endswith('_photo') or key.endswith('_photo_path') or key.endswith('_base64'):
-            image_keys.add(key.replace('_photo', '').replace('_photo_path', '').replace('_base64', ''))
+            base = key.replace('_photo', '').replace('_photo_path', '').replace('_base64', '')
+            image_keys.add(base)
 
     print(f"[🔎] Found image_keys: {image_keys}", flush=True)
 
+    # Attach images into context
     for base in image_keys:
         field_name = base + '_photo'
         print(f"[🔄] Evaluating field: {field_name}", flush=True)
@@ -130,17 +132,19 @@ def generate_report():
             except Exception as e:
                 print(f"[⚠️] Failed to decode base64 for {field_name}: {e}", flush=True)
 
-# Convert severity blocks (already numbered in Dart) into multi-paragraph Subdocs
-for sev_key in ["aa_findings", "a_findings", "b_findings", "c_findings"]:
-    if sev_key in context:
-        context[sev_key] = lines_to_subdoc(doc, context[sev_key])
+    # Convert severity blocks (already numbered in Dart) into multi-paragraph Subdocs
+    for sev_key in ["aa_findings", "a_findings", "b_findings", "c_findings"]:
+        if sev_key in context:
+            context[sev_key] = lines_to_subdoc(doc, context[sev_key])
 
-
-    # Attach Jinja environment with our custom nl2br filter
+    # Jinja environment (nl2br available for other fields if you want)
     env = Environment(autoescape=True)
     env.filters["nl2br"] = nl2br
+
+    # Render with context and custom env
     doc.render(context, jinja_env=env)
 
+    # Save and optionally convert to PDF
     with tempfile.TemporaryDirectory() as temp_dir:
         docx_path = os.path.join(temp_dir, "report.docx")
         doc.save(docx_path)
