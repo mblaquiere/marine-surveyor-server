@@ -25,7 +25,7 @@ def nl2br(value):
         if i < len(parts) - 1:
             rt.add('\n')  # real Word line break
     return rt
-# ------------------------
+# --------------------------
 
 def _split_to_lines(value):
     """
