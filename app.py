@@ -27,29 +27,16 @@ def nl2br(value):
     return rt
 # ------------------------
 
-def lines_to_subdoc(doc, value):
+def _split_to_lines(value):
     """
-    Turn a newline-separated string into a Subdoc where each line is its own paragraph.
-    If value is empty/None, inserts 'None Observed'.
+    Split a newline-separated string into a clean list of non-empty lines.
+    Falls back to ['None Observed'] if there are no lines.
     """
     text = "" if value is None else str(value)
-    lines = [l for l in text.split('\n')]
+    raw_lines = text.split('\n')
+    lines = [ln.strip() for ln in raw_lines if ln.strip()]
+    return lines if lines else ["None Observed"]
 
-    sub = doc.new_subdoc()
-
-    # If there are no non-empty lines, write a friendly default
-    if not any(l.strip() for l in lines):
-        sub.add_paragraph("None Observed")
-        return sub
-
-    for l in lines:
-        # Preserve blank lines as empty paragraphs for readability
-        if l.strip():
-            sub.add_paragraph(l)
-        else:
-            sub.add_paragraph("")  # empty paragraph
-
-    return sub
 
 
 def resize_image_if_needed(path, max_width=1200):
@@ -132,10 +119,17 @@ def generate_report():
             except Exception as e:
                 print(f"[⚠️] Failed to decode base64 for {field_name}: {e}", flush=True)
 
-    # Convert severity blocks (already numbered in Dart) into multi-paragraph Subdocs
-    for sev_key in ["aa_findings", "a_findings", "b_findings", "c_findings"]:
-        if sev_key in context:
-            context[sev_key] = lines_to_subdoc(doc, context[sev_key])
+    # Build arrays for severity loops in the template
+    for sev in ("aa", "a", "b", "c"):
+        key = f"{sev}_findings"
+        context[f"{sev}_findings_list"] = _split_to_lines(context.get(key))
+
+    # Debug: verify counts
+    print("[lists] aa:", len(context.get("aa_findings_list", [])),
+          "a:", len(context.get("a_findings_list", [])),
+          "b:", len(context.get("b_findings_list", [])),
+          "c:", len(context.get("c_findings_list", [])),
+          flush=True)
 
     # Jinja environment (nl2br available for other fields if you want)
     env = Environment(autoescape=True)
