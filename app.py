@@ -8,7 +8,7 @@ from flask import Flask, request, send_file
 from docxtpl import DocxTemplate, InlineImage
 from jinja2 import Environment
 from docx.shared import Inches
-from PIL import Image
+from PIL import Image, ImageOps
 
 app = Flask(__name__)
 
@@ -40,19 +40,42 @@ def _split_to_lines(value):
 
 
 
-def resize_image_if_needed(path, max_width=1200):
+def prepare_image(path, max_width=1200):
+    """
+    Turn a photo the right way up, and shrink it if it is wider than the page
+    can use. Returns a path to use in the document -- the original if nothing
+    needed doing, otherwise a new temporary file.
+
+    Phones almost never rotate the pixels when you turn the camera. They write
+    the pixels the way the sensor saw them and add an EXIF orientation tag
+    saying which way is up. Word ignores that tag, so a photo taken in portrait
+    lands on the page on its side. exif_transpose rotates the pixels for real
+    and drops the tag.
+    """
     try:
         with Image.open(path) as img:
-            if img.width > max_width:
-                ratio = max_width / img.width
-                new_height = int(img.height * ratio)
-                resized = img.resize((max_width, new_height), Image.LANCZOS)
+            # Tag 274 is Orientation. 1 means "already upright"; missing means
+            # the same. Ask before transposing, because exif_transpose hands
+            # back a new object either way and cannot be used as the answer.
+            orientation = (img.getexif() or {}).get(274, 1)
+            rotated = orientation not in (1, None)
+            upright = ImageOps.exif_transpose(img) if rotated else img
 
-                temp_path = path + "_resized.jpg"
-                resized.save(temp_path, format='JPEG', quality=85)
-                return temp_path
+            if upright.width > max_width:
+                ratio = max_width / upright.width
+                new_height = int(upright.height * ratio)
+                upright = upright.resize((max_width, new_height), Image.LANCZOS)
+            elif not rotated:
+                return path
+
+            if upright.mode not in ("RGB", "L"):
+                upright = upright.convert("RGB")
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                upright.save(tmp, format='JPEG', quality=85)
+                return tmp.name
     except Exception as e:
-        print(f"[⚠️] Image resize failed for {path}: {e}", flush=True)
+        print(f"[⚠️] Image prepare failed for {path}: {e}", flush=True)
     return path
 
 
@@ -96,14 +119,14 @@ def generate_report():
                 file.save(tmp.name)
                 temp_path = tmp.name
 
-            temp_path = resize_image_if_needed(temp_path)
+            temp_path = prepare_image(temp_path)
             context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
 
         elif base + '_photo_path' in form:
             path = form[base + '_photo_path']
             print(f"[📄] Using on-disk path for {field_name}: {path}", flush=True)
             if os.path.exists(path):
-                path = resize_image_if_needed(path)
+                path = prepare_image(path)
                 context[field_name] = InlineImage(doc, path, width=Inches(4.5))
             else:
                 print(f"[⚠️] Provided path does not exist: {path}", flush=True)
@@ -115,7 +138,7 @@ def generate_report():
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                     tmp.write(data)
                     temp_path = tmp.name
-                temp_path = resize_image_if_needed(temp_path)
+                temp_path = prepare_image(temp_path)
                 context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
             except Exception as e:
                 print(f"[⚠️] Failed to decode base64 for {field_name}: {e}", flush=True)
