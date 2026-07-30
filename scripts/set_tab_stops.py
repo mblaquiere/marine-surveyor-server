@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
-"""Put a right tab stop on the template's body styles.
+"""Put a right tab stop in every value cell of the template.
 
 Run this after every export from Pages.
 
 Why it exists: the template is authored in Pages and exported to .docx, and the
-conversion does not carry tab positions across faithfully. Pages measures a tab
-stop from the page; Word measures it from the left edge of the table cell the
-text sits in. The existing exported stops sit at 6.15" inside a 2.06" cell,
-which is to say nowhere.
+conversion does not carry tab positions across. Pages measures a tab stop from
+the page; Word measures it from the left edge of the table cell the text sits
+in. The exported stops sit at 6.15" inside a 2.06" cell, which is nowhere.
 
-So the position is set here instead, in the units Word actually uses, and the
-number lives in one place rather than being re-typed into a dialog after every
-export.
+Why it is per cell and not per style: the 27 tables do not share a column width.
+They run from 4.12" (Safety Equipment) to 4.44" (Deck and Hull). A single
+position set on the Body A/B/C styles fits the wide ones and pushes the date
+over the table line on the narrow ones. So each table gets a stop measured from
+its own width.
 
     python3 scripts/set_tab_stops.py survey_template_owner.docx
-
-The report's item lines are "Sound · Volvo SN A165149<TAB>05/2026". With the
-stop in place the dates form a column down the right of the value cell. Without
-it they still print, just after a gap.
 """
 
 import re
@@ -26,43 +23,130 @@ import sys
 import zipfile
 from pathlib import Path
 
-# The value cells are 4.44" wide and Word keeps 0.08" of padding each side, so
-# the text area is about 4.28". A hair short of that keeps a long description
-# from pushing the date onto its own line.
-TAB_INCHES = 4.25
-TWIPS = int(TAB_INCHES * 1440)
+# Word's default cell padding, each side.
+CELL_MARGIN = 115  # twips, 0.08"
 
-# The three paragraph styles the value cells use.
-STYLES = ("Body A", "Body B", "Body C")
+# Space between the date and the table line. Without it the text sits against
+# the border and reads as an error.
+GUTTER = 115  # twips, 0.08"
 
-TAB_XML = f'<w:tabs><w:tab w:val="right" w:pos="{TWIPS}"/></w:tabs>'
+# Styles a previous version of this script wrote a stop into. Those are removed:
+# a style-level stop is the wrong shape for this and would fight the per-cell
+# ones set below.
+STYLES_TO_CLEAN = ("Body A", "Body B", "Body C")
 
 
-def add_tab_stop(styles_xml: str, style_id: str) -> tuple[str, str]:
-    """Returns the edited xml and a word on what happened."""
-    match = re.search(
-        r'<w:style [^>]*w:styleId="' + re.escape(style_id) + r'".*?</w:style>',
-        styles_xml,
-        re.S,
-    )
-    if not match:
-        return styles_xml, "not found"
+def blocks(xml: str, tag: str):
+    """Yields (start, end) for each top-level <tag>…</tag>, nesting aware."""
+    open_re = re.compile(r"<" + tag + r"(?:\s[^>]*)?>")
+    close = f"</{tag}>"
+    i, depth, start = 0, 0, None
+    while i < len(xml):
+        m = open_re.match(xml, i)
+        if m:
+            if depth == 0:
+                start = m.start()
+            depth += 1
+            i = m.end()
+            continue
+        if xml.startswith(close, i):
+            depth -= 1
+            i += len(close)
+            if depth == 0:
+                yield start, i
+            continue
+        i += 1
 
-    block = match.group(0)
-    if "<w:tabs>" in block:
-        # Replace rather than add. Two sets of tabs in one style is undefined
-        # and Word picks one without saying which.
-        updated = re.sub(r"<w:tabs>.*?</w:tabs>", TAB_XML, block, count=1, flags=re.S)
-        note = "replaced"
+
+def set_tab(paragraph: str, pos: int) -> str:
+    """Gives one paragraph a single right tab stop at pos."""
+    tabs = f'<w:tabs><w:tab w:val="right" w:pos="{pos}"/></w:tabs>'
+
+    ppr = re.search(r"<w:pPr>.*?</w:pPr>", paragraph, re.S)
+    if not ppr:
+        # No properties at all. Word is happy with pPr as the first child.
+        return paragraph.replace(">", ">" + f"<w:pPr>{tabs}</w:pPr>", 1)
+
+    body = ppr.group(0)
+    if "<w:tabs>" in body:
+        updated = re.sub(r"<w:tabs>.*?</w:tabs>", tabs, body, count=1, flags=re.S)
     else:
-        # Tabs belong inside pPr. A style without one is not something this
-        # template produces, but say so rather than write invalid xml.
-        if "<w:pPr>" not in block:
-            return styles_xml, "no pPr — left alone"
-        updated = block.replace("<w:pPr>", "<w:pPr>" + TAB_XML, 1)
-        note = "added"
+        updated = body.replace("<w:pPr>", "<w:pPr>" + tabs, 1)
+    return paragraph.replace(body, updated, 1)
 
-    return styles_xml.replace(block, updated, 1), note
+
+def process_document(xml: str) -> tuple[str, int, list[str]]:
+    out = []
+    last = 0
+    touched = 0
+    widths = []
+
+    for tstart, tend in blocks(xml, "w:tbl"):
+        table = xml[tstart:tend]
+        grid = re.search(r"<w:tblGrid>.*?</w:tblGrid>", table, re.S)
+        cols = (
+            [int(c) for c in re.findall(r'<w:gridCol w:w="(\d+)"', grid.group(0))]
+            if grid
+            else []
+        )
+        if len(cols) < 2:
+            continue
+
+        # The value column is the last one. The stop goes just inside it.
+        pos = cols[-1] - (2 * CELL_MARGIN) - GUTTER
+        widths.append(f"{cols[-1] / 1440:.2f}\" -> {pos / 1440:.2f}\"")
+
+        rebuilt = []
+        seen = 0
+        for rstart, rend in blocks(table, "w:tr"):
+            row = table[rstart:rend]
+            cells = list(blocks(row, "w:tc"))
+            if not cells:
+                continue
+            cstart, cend = cells[-1]  # the value cell
+            cell = row[cstart:cend]
+
+            new_cell = []
+            at = 0
+            for pstart, pend in blocks(cell, "w:p"):
+                new_cell.append(cell[at:pstart])
+                new_cell.append(set_tab(cell[pstart:pend], pos))
+                at = pend
+                seen += 1
+            new_cell.append(cell[at:])
+
+            rebuilt.append((rstart, rend, row[:cstart] + "".join(new_cell) + row[cend:]))
+
+        at = 0
+        pieces = []
+        for rstart, rend, new_row in rebuilt:
+            pieces.append(table[at:rstart])
+            pieces.append(new_row)
+            at = rend
+        pieces.append(table[at:])
+
+        out.append(xml[last:tstart])
+        out.append("".join(pieces))
+        last = tend
+        touched += seen
+
+    out.append(xml[last:])
+    return "".join(out), touched, widths
+
+
+def clean_styles(styles_xml: str) -> str:
+    """Takes back the style-level stop an earlier version of this script set."""
+    for style_id in STYLES_TO_CLEAN:
+        m = re.search(
+            r'<w:style [^>]*w:styleId="' + re.escape(style_id) + r'".*?</w:style>',
+            styles_xml,
+            re.S,
+        )
+        if not m:
+            continue
+        cleaned = re.sub(r"<w:tabs>.*?</w:tabs>", "", m.group(0), flags=re.S)
+        styles_xml = styles_xml.replace(m.group(0), cleaned, 1)
+    return styles_xml
 
 
 def main(path: Path) -> int:
@@ -74,24 +158,27 @@ def main(path: Path) -> int:
     shutil.copy2(path, backup)
 
     source = zipfile.ZipFile(path)
-    styles = source.read("word/styles.xml").decode("utf8")
-
-    for style_id in STYLES:
-        styles, note = add_tab_stop(styles, style_id)
-        print(f"  {style_id:8} {note}")
+    document, touched, widths = process_document(
+        source.read("word/document.xml").decode("utf8")
+    )
+    styles = clean_styles(source.read("word/styles.xml").decode("utf8"))
 
     out = path.with_suffix(".tmp")
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as target:
         for item in source.infolist():
             data = source.read(item.filename)
-            if item.filename == "word/styles.xml":
+            if item.filename == "word/document.xml":
+                data = document.encode("utf8")
+            elif item.filename == "word/styles.xml":
                 data = styles.encode("utf8")
             target.writestr(item, data)
     source.close()
     out.replace(path)
 
-    print(f'\nRight tab stop at {TAB_INCHES}" set on {len(STYLES)} styles.')
-    print(f"Previous file kept as {backup.name}")
+    print(f"{len(widths)} tables, {touched} value cells")
+    for w in widths:
+        print(f"  {w}")
+    print(f"\nPrevious file kept as {backup.name}")
     return 0
 
 
