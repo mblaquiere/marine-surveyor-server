@@ -36,6 +36,18 @@ DATE_WIDTH = 1000  # twips, 0.69"
 # line: the line was past the margin.
 TEXT_WIDTH = 9360  # twips, 6.5"
 
+# One label width for every item table.
+#
+# Squaring the outer width alone was not enough: each table kept its own split,
+# so the label columns came out between 1.79" and 1.90" and the divider jogged
+# left and right down the document. A tenth of an inch is the worst amount to be
+# out by -- too small to look deliberate, too large to look like nothing.
+#
+# 1.90" is the widest any of them already had, so nothing that fits on one line
+# today starts wrapping. The longest label, "Harnesses / Jacklines / Tethers",
+# wraps at any width short of 2.9" and always did.
+LABEL_WIDTH = 2740  # twips, 1.90"
+
 PLACEHOLDER = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
 # Keys that describe the report or the vessel, not an item on the boat. A table
@@ -137,9 +149,9 @@ def process(xml: str) -> tuple[str, int, int]:
         if found and found <= NOT_ITEMS:
             continue
 
-        # Square the table to the text column and un-indent it. The label column
-        # keeps its share of what is left after the date column.
-        label = round((TEXT_WIDTH - DATE_WIDTH) * cols[0] / sum(cols))
+        # Square the table to the text column, un-indent it, and give every
+        # table the same three column widths.
+        label = LABEL_WIDTH
         value_width = TEXT_WIDTH - DATE_WIDTH - label
 
         new_grid = (
