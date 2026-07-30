@@ -143,14 +143,21 @@ def generate_report():
             except Exception as e:
                 print(f"[⚠️] Failed to decode base64 for {field_name}: {e}", flush=True)
 
-    # Build arrays for severity loops in the template (incl. FTR)
-    for sev in ("aa", "a", "b", "c", "ftr"):
+    # Build arrays for severity loops in the template.
+    #
+    # "monitor" is not a professional survey grade. It means watch this, which
+    # is what an owner writes down most of the time -- 43 of the 56 findings on
+    # SV Liquid are monitor. Without it the report omits three quarters of what
+    # a walk turned up. Harmless on the older template, which has no block to
+    # loop over it; the owner template has one.
+    for sev in ("aa", "a", "b", "c", "monitor", "ftr"):
         key = f"{sev}_findings"
         context[f"{sev}_findings_list"] = _split_to_lines(context.get(key))
 
     # Debug: verify counts incl. FTR
     print("[lists] aa:", len(context.get("aa_findings_list", [])),
           "a:", len(context.get("a_findings_list", [])),
+          "monitor:", len(context.get("monitor_findings_list", [])),
           "b:", len(context.get("b_findings_list", [])),
           "c:", len(context.get("c_findings_list", [])),
           "ftr:", len(context.get("ftr_findings_list", [])),
