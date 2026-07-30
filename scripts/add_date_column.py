@@ -23,11 +23,30 @@ import sys
 import zipfile
 from pathlib import Path
 
-# Wide enough for "05/2026" at 11pt with room either side. Taken out of the
-# value column, so the table stays the same overall width.
-DATE_WIDTH = 850  # twips, 0.59"
+# Wide enough for "05/2026" at 11pt with room either side.
+DATE_WIDTH = 1000  # twips, 0.69"
+
+# The page is 8.5" with 1" margins, so the text column is 6.5". Every item table
+# is squared to this and un-indented.
+#
+# They did not start that way. As exported from Pages they were 5.96" to 6.50"
+# wide and indented anywhere from 0.23" to 0.75", so most of them ran off the
+# right of the page -- one by three quarters of an inch -- and none of them
+# lined up with each other. That is why the date looked like it sat on the table
+# line: the line was past the margin.
+TEXT_WIDTH = 9360  # twips, 6.5"
 
 PLACEHOLDER = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+
+# Keys that describe the report or the vessel, not an item on the boat. A table
+# made only of these is the cover sheet and gets no date column -- the first
+# version gave it {{survey_date_date}}, which is nothing.
+NOT_ITEMS = {
+    "survey_number", "survey_date", "survey_type", "survey_conditions",
+    "survey_overview", "location_of_survey", "present_at_survey", "weather",
+    "client_name", "client_address", "client_email",
+    "surveyor_name", "surveyor_email", "surveyor_phone", "surveyor_website",
+}
 
 
 def blocks(xml: str, tag: str):
@@ -113,15 +132,37 @@ def process(xml: str) -> tuple[str, int, int]:
         if len(cols) != 2:
             continue
 
-        # Take the width out of the value column so the table does not grow.
+        # Leave the cover sheet alone.
+        found = {m.group(1) for m in PLACEHOLDER.finditer(re.sub(r"<[^>]+>", "", table))}
+        if found and found <= NOT_ITEMS:
+            continue
+
+        # Square the table to the text column and un-indent it. The label column
+        # keeps its share of what is left after the date column.
+        label = round((TEXT_WIDTH - DATE_WIDTH) * cols[0] / sum(cols))
+        value_width = TEXT_WIDTH - DATE_WIDTH - label
+
         new_grid = (
             "<w:tblGrid>"
-            + f'<w:gridCol w:w="{cols[0]}"/>'
-            + f'<w:gridCol w:w="{cols[1] - DATE_WIDTH}"/>'
+            + f'<w:gridCol w:w="{label}"/>'
+            + f'<w:gridCol w:w="{value_width}"/>'
             + f'<w:gridCol w:w="{DATE_WIDTH}"/>'
             + "</w:tblGrid>"
         )
         table = table.replace(grid.group(0), new_grid, 1)
+
+        table = re.sub(
+            r'<w:tblW w:w="\d+" w:type="dxa"/>',
+            f'<w:tblW w:w="{TEXT_WIDTH}" w:type="dxa"/>',
+            table,
+            count=1,
+        )
+        table = re.sub(
+            r'<w:tblInd w:w="\d+"([^>]*)/>',
+            r'<w:tblInd w:w="0"\1/>',
+            table,
+            count=1,
+        )
         widened += 1
 
         rows = list(blocks(table, "w:tr"))
@@ -146,6 +187,12 @@ def process(xml: str) -> tuple[str, int, int]:
                     row = row.replace(
                         "<w:tcPr>", '<w:tcPr><w:gridSpan w:val="3"/>', 1
                     )
+                row = re.sub(
+                    r'<w:tcW[^>]*/>',
+                    f'<w:tcW w:type="dxa" w:w="{TEXT_WIDTH}"/>',
+                    row,
+                    count=1,
+                )
                 pieces.append(row)
                 continue
 
@@ -153,24 +200,35 @@ def process(xml: str) -> tuple[str, int, int]:
                 pieces.append(row)
                 continue
 
+            lstart, lend = cells[0]
             cstart, cend = cells[-1]
+
+            # Every cell takes the grid's width. Leaving the old ones in place
+            # is what let the tables disagree with their own grid and run off
+            # the page.
+            def resize(cell: str, w: int) -> str:
+                return re.sub(
+                    r'<w:tcW[^>]*/>',
+                    f'<w:tcW w:type="dxa" w:w="{w}"/>',
+                    cell,
+                    count=1,
+                )
+
+            label_cell = resize(row[lstart:lend], label)
             value = row[cstart:cend]
 
-            # Narrow the value cell by exactly what the date cell takes.
-            narrowed = re.sub(
-                r'<w:tcW[^>]*w:w="(\d+)"([^>]*)/>',
-                lambda m: f'<w:tcW w:type="dxa" w:w="{int(m.group(1)) - DATE_WIDTH}"/>',
-                value,
-                count=1,
-            )
-
             found = PLACEHOLDER.search(re.sub(r"<[^>]+>", "", value))
-            key = found.group(1) if found else None
+            key = found.group(1) if found and found.group(1) not in NOT_ITEMS else None
             if key:
                 dated += 1
 
             pieces.append(
-                row[:cstart] + narrowed + date_cell(value, key) + row[cend:]
+                row[:lstart]
+                + label_cell
+                + row[lend:cstart]
+                + resize(value, value_width)
+                + date_cell(value, key)
+                + row[cend:]
             )
 
         pieces.append(table[at:])
