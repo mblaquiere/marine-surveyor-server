@@ -1,1 +1,3 @@
 *.before-tabs
+*.bak
+__pycache__/

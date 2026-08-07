@@ -2,6 +2,7 @@ import json
 import os
 import io
 import base64
+import re
 import tempfile
 import subprocess
 from flask import Flask, request, send_file
@@ -98,9 +99,18 @@ def generate_report():
         if not k.endswith('_photo') and not k.endswith('_photo_path') and not k.endswith('_base64') and k != 'template' and k != 'format'
     }
 
+    # A finding's photograph, which the severity loops further down place
+    # beside its text. Named <severity>_finding_<n>_photo.
+    FINDING_PHOTO = re.compile(r"^(aa|a|b|c|monitor|ftr)_finding_\d+_photo")
+
     # Resolve image keys from any of *_photo, *_photo_path, *_base64
     image_keys = set()
     for key in list(form.keys()) + list(files.keys()):
+        # Findings photographs are handled with their findings, not as
+        # standalone placeholders. Without this they would be decoded and
+        # resized twice, and land in the context under a name no template has.
+        if FINDING_PHOTO.match(key):
+            continue
         if key.endswith('_photo') or key.endswith('_photo_path') or key.endswith('_base64'):
             base = key.replace('_photo', '').replace('_photo_path', '').replace('_base64', '')
             image_keys.add(base)
@@ -152,7 +162,36 @@ def generate_report():
     # loop over it; the owner template has one.
     for sev in ("aa", "a", "b", "c", "monitor", "ftr"):
         key = f"{sev}_findings"
-        context[f"{sev}_findings_list"] = _split_to_lines(context.get(key))
+        lines = _split_to_lines(context.get(key))
+        context[f"{sev}_findings_list"] = lines
+
+        # The same findings, each able to carry a photograph.
+        #
+        # Two shapes rather than one because the older professional template
+        # loops over plain strings and still has to work. The owner template
+        # loops over these instead.
+        #
+        # A finding without a photograph is an assertion; with one it is
+        # evidence. That is the whole reason for this.
+        items = []
+        for n, text in enumerate(lines, start=1):
+            photo = ""
+            field = f"{sev}_finding_{n}_photo"
+            if field in files:
+                uploaded = files[field]
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=os.path.splitext(uploaded.filename)[1] or ".jpg",
+                ) as tmp:
+                    uploaded.save(tmp.name)
+                    ready = prepare_image(tmp.name)
+                # Narrower than the walk-round photographs at 4.5". A finding
+                # photograph is a detail shot sitting under one line of text,
+                # not a plate.
+                photo = InlineImage(doc, ready, width=Inches(3.0))
+                print(f"[📸] {field} attached", flush=True)
+            items.append({"text": text, "photo": photo})
+        context[f"{sev}_findings_items"] = items
 
     # Debug: verify counts incl. FTR
     print("[lists] aa:", len(context.get("aa_findings_list", [])),
