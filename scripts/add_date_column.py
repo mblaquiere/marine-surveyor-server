@@ -61,6 +61,16 @@ NOT_ITEMS = {
 }
 
 
+def is_item(key: str) -> bool:
+    """Whether a placeholder is something on the boat that gets inspected.
+
+    Everything vessel_* is a fact about the hull -- length, beam, hull
+    identification number -- and a fact has no inspection date. The first
+    version gave them one, so the header table carried {{vessel_loa_date}}.
+    """
+    return key not in NOT_ITEMS and not key.startswith("vessel_")
+
+
 def blocks(xml: str, tag: str):
     """Yields (start, end) for each top-level <tag>…</tag>, nesting aware."""
     open_re = re.compile(r"<" + tag + r"(?:\s[^>]*)?>")
@@ -144,21 +154,23 @@ def process(xml: str) -> tuple[str, int, int]:
         if len(cols) != 2:
             continue
 
-        # Leave the cover sheet alone.
+        # The cover sheet and the vessel header hold facts, not observations.
+        # They get squared to the page like everything else -- the cover sheet
+        # was indented 0.75" and hanging off the right edge -- but no date
+        # column.
         found = {m.group(1) for m in PLACEHOLDER.finditer(re.sub(r"<[^>]+>", "", table))}
-        if found and found <= NOT_ITEMS:
-            continue
+        items = bool(found) and any(is_item(k) for k in found)
 
-        # Square the table to the text column, un-indent it, and give every
-        # table the same three column widths.
+        # Same label width everywhere, so the divider does not move between one
+        # table and the next.
         label = LABEL_WIDTH
-        value_width = TEXT_WIDTH - DATE_WIDTH - label
+        value_width = TEXT_WIDTH - label - (DATE_WIDTH if items else 0)
 
         new_grid = (
             "<w:tblGrid>"
             + f'<w:gridCol w:w="{label}"/>'
             + f'<w:gridCol w:w="{value_width}"/>'
-            + f'<w:gridCol w:w="{DATE_WIDTH}"/>'
+            + (f'<w:gridCol w:w="{DATE_WIDTH}"/>' if items else "")
             + "</w:tblGrid>"
         )
         table = table.replace(grid.group(0), new_grid, 1)
@@ -188,14 +200,14 @@ def process(xml: str) -> tuple[str, int, int]:
             if len(cells) == 1:
                 # A heading spanning the table. Widen the span rather than add a
                 # cell, or the row stops lining up with the ones around it.
-                if "<w:gridSpan" in row:
+                if "<w:gridSpan" in row and items:
                     row = re.sub(
                         r'<w:gridSpan w:val="(\d+)"/>',
                         lambda m: f'<w:gridSpan w:val="{int(m.group(1)) + 1}"/>',
                         row,
                         count=1,
                     )
-                else:
+                elif items:
                     row = row.replace(
                         "<w:tcPr>", '<w:tcPr><w:gridSpan w:val="3"/>', 1
                     )
@@ -230,7 +242,7 @@ def process(xml: str) -> tuple[str, int, int]:
             value = row[cstart:cend]
 
             found = PLACEHOLDER.search(re.sub(r"<[^>]+>", "", value))
-            key = found.group(1) if found and found.group(1) not in NOT_ITEMS else None
+            key = found.group(1) if found and is_item(found.group(1)) else None
             if key:
                 dated += 1
 
@@ -239,7 +251,7 @@ def process(xml: str) -> tuple[str, int, int]:
                 + label_cell
                 + row[lend:cstart]
                 + resize(value, value_width)
-                + date_cell(value, key)
+                + (date_cell(value, key) if items else "")
                 + row[cend:]
             )
 
