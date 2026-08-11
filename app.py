@@ -2,6 +2,7 @@ import json
 import os
 import io
 import base64
+import hmac
 import re
 import tempfile
 import subprocess
@@ -12,6 +13,25 @@ from docx.shared import Inches
 from PIL import Image, ImageOps
 
 app = Flask(__name__)
+
+# Shared secret with the app, sent as the X-Report-Key header on every
+# /generate_report call. Set on Render's dashboard, not committed here -- see
+# render.yaml. A report carries a name, an address, a boat's registration
+# numbers and every photo taken of it, and until this existed the endpoint
+# handed all of it to anyone who asked, with nothing to check who was asking.
+REPORT_API_KEY = os.environ.get('REPORT_API_KEY')
+
+
+def _report_key_is_valid(provided):
+    """True only if the server has a key configured and it matches.
+
+    No key configured is not "open" -- it means every request gets refused
+    until one is set. A check that quietly does nothing when misconfigured
+    is worse than the check not existing, because it looks like protection.
+    """
+    if not REPORT_API_KEY or not provided:
+        return False
+    return hmac.compare_digest(provided, REPORT_API_KEY)
 
 # ---- Custom filters ----
 def nl2br(value):
@@ -82,6 +102,17 @@ def prepare_image(path, max_width=1200):
 
 @app.route('/generate_report', methods=['POST'])
 def generate_report():
+    if not _report_key_is_valid(request.headers.get('X-Report-Key')):
+        if not REPORT_API_KEY:
+            print(
+                "[🔒] REPORT_API_KEY is not set on this server -- refusing "
+                "every request until it is. Set it on Render's dashboard.",
+                flush=True,
+            )
+            return {"error": "Server is not configured to accept report requests."}, 500
+        print("[🔒] Rejected /generate_report: missing or wrong X-Report-Key", flush=True)
+        return {"error": "Missing or invalid X-Report-Key."}, 401
+
     form = request.form.to_dict()
     files = request.files
 
@@ -283,4 +314,9 @@ def check_tectonic():
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # Off unless asked for. Flask's debug mode opens the Werkzeug debugger --
+    # a console that runs arbitrary Python -- to anyone who can trigger an
+    # unhandled exception. Fine on a laptop, not fine on the internet. Set
+    # FLASK_DEBUG=1 locally if you want it back.
+    debug = os.environ.get('FLASK_DEBUG') == '1'
+    app.run(host='0.0.0.0', port=port, debug=debug)

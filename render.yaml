@@ -5,3 +5,10 @@ services:
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python app.py"
     plan: free
+    envVars:
+      # Shared secret with the app's X-Report-Key header. sync: false means
+      # Render won't store a value here -- set it once in the dashboard
+      # (Environment tab) and it stays there. Must match REPORT_API_KEY in
+      # the app's .env.
+      - key: REPORT_API_KEY
+        sync: false
