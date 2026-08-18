@@ -1,3 +1,4 @@
 *.before-tabs
+*.before-dates
 *.bak
 __pycache__/

@@ -6,7 +6,8 @@ import hmac
 import re
 import tempfile
 import subprocess
-from flask import Flask, request, send_file
+from flask import Flask, g, request, send_file
+from werkzeug.exceptions import RequestEntityTooLarge
 from docxtpl import DocxTemplate, InlineImage
 from jinja2 import Environment
 from docx.shared import Inches
@@ -14,12 +15,62 @@ from PIL import Image, ImageOps
 
 app = Flask(__name__)
 
+# A report carries every photograph from the walk. The app shrinks each one
+# before sending, so a full survey runs to ten or fifteen megabytes, but nothing
+# stopped a far bigger one arriving and being read whole into the memory of a
+# 512MB instance. Over this it now fails as a plain 413, which the app can put
+# into words, rather than as an instance that runs out of memory and answers
+# 502, which it cannot.
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def _report_too_large(_error):
+    print("[📦] Refused a report over the size limit", flush=True)
+    return {"error": "That report is too large to build."}, 413
+
+
+def _temp_file(suffix):
+    """A temporary file this request will clean up.
+
+    Every photograph used to make one or two of these with delete=False and
+    nothing ever removed them. Render recycles containers often enough that it
+    never showed, which is exactly why it would have shown first on a container
+    that stayed up.
+    """
+    handle, path = tempfile.mkstemp(suffix=suffix)
+    os.close(handle)
+    paths = getattr(g, '_temp_paths', None)
+    if paths is None:
+        paths = []
+        g._temp_paths = paths
+    paths.append(path)
+    return path
+
+
+@app.teardown_request
+def _remove_temp_files(_error):
+    for path in getattr(g, '_temp_paths', []):
+        try:
+            os.remove(path)
+        except OSError as e:
+            print(f"[⚠️] Could not remove {path}: {e}", flush=True)
+
 # Shared secret with the app, sent as the X-Report-Key header on every
 # /generate_report call. Set on Render's dashboard, not committed here -- see
 # render.yaml. A report carries a name, an address, a boat's registration
 # numbers and every photo taken of it, and until this existed the endpoint
 # handed all of it to anyone who asked, with nothing to check who was asking.
 REPORT_API_KEY = os.environ.get('REPORT_API_KEY')
+
+# The only two templates this server has. `template` arrives on the form, and
+# without this it went straight into DocxTemplate with nothing checked -- an
+# unvalidated path, behind a key that ships inside every copy of the app. The
+# key is a shared secret at best; this is the part that does not depend on it.
+TEMPLATES = (
+    'survey_template_01a.docx',
+    'survey_template_owner.docx',
+)
 
 
 def _report_key_is_valid(provided):
@@ -92,9 +143,9 @@ def prepare_image(path, max_width=1200):
             if upright.mode not in ("RGB", "L"):
                 upright = upright.convert("RGB")
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                upright.save(tmp, format='JPEG', quality=85)
-                return tmp.name
+            prepared = _temp_file(".jpg")
+            upright.save(prepared, format='JPEG', quality=85)
+            return prepared
     except Exception as e:
         print(f"[⚠️] Image prepare failed for {path}: {e}", flush=True)
     return path
@@ -121,6 +172,9 @@ def generate_report():
 
     requested_format = form.get("format", "docx").lower()
     template_name = form.get("template", "survey_template_01a.docx")
+    if template_name not in TEMPLATES:
+        print(f"[🚫] Refused unknown template: {template_name!r}", flush=True)
+        return {"error": "Unknown template."}, 400
 
     doc = DocxTemplate(template_name)
 
@@ -134,7 +188,7 @@ def generate_report():
     # beside its text. Named <severity>_finding_<n>_photo.
     FINDING_PHOTO = re.compile(r"^(aa|a|b|c|monitor|ftr)_finding_\d+_photo")
 
-    # Resolve image keys from any of *_photo, *_photo_path, *_base64
+    # Resolve image keys from either of *_photo, *_base64
     image_keys = set()
     for key in list(form.keys()) + list(files.keys()):
         # Findings photographs are handled with their findings, not as
@@ -142,8 +196,12 @@ def generate_report():
         # resized twice, and land in the context under a name no template has.
         if FINDING_PHOTO.match(key):
             continue
-        if key.endswith('_photo') or key.endswith('_photo_path') or key.endswith('_base64'):
-            base = key.replace('_photo', '').replace('_photo_path', '').replace('_base64', '')
+        # No _photo_path here any more. It named a file for the server to read
+        # off its own disk, and the app never sends one -- it strips those and
+        # re-sends each as an uploaded file. So the only caller it could ever
+        # have served was one poking at the endpoint.
+        if key.endswith('_photo') or key.endswith('_base64'):
+            base = key.replace('_photo', '').replace('_base64', '')
             image_keys.add(base)
 
     print(f"[🔎] Found image_keys: {image_keys}", flush=True)
@@ -156,29 +214,19 @@ def generate_report():
         if field_name in files:
             print(f"[🖼️] Using uploaded file for {field_name}", flush=True)
             file = files[field_name]
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
-                file.save(tmp.name)
-                temp_path = tmp.name
+            temp_path = _temp_file(os.path.splitext(file.filename)[1])
+            file.save(temp_path)
 
             temp_path = prepare_image(temp_path)
             context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
-
-        elif base + '_photo_path' in form:
-            path = form[base + '_photo_path']
-            print(f"[📄] Using on-disk path for {field_name}: {path}", flush=True)
-            if os.path.exists(path):
-                path = prepare_image(path)
-                context[field_name] = InlineImage(doc, path, width=Inches(4.5))
-            else:
-                print(f"[⚠️] Provided path does not exist: {path}", flush=True)
 
         elif base + '_base64' in form:
             print(f"[🧬] Decoding base64 for {field_name}", flush=True)
             try:
                 data = base64.b64decode(form[base + '_base64'])
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                    tmp.write(data)
-                    temp_path = tmp.name
+                temp_path = _temp_file(".jpg")
+                with open(temp_path, 'wb') as handle:
+                    handle.write(data)
                 temp_path = prepare_image(temp_path)
                 context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
             except Exception as e:
@@ -210,12 +258,11 @@ def generate_report():
             field = f"{sev}_finding_{n}_photo"
             if field in files:
                 uploaded = files[field]
-                with tempfile.NamedTemporaryFile(
-                    delete=False,
-                    suffix=os.path.splitext(uploaded.filename)[1] or ".jpg",
-                ) as tmp:
-                    uploaded.save(tmp.name)
-                    ready = prepare_image(tmp.name)
+                saved = _temp_file(
+                    os.path.splitext(uploaded.filename)[1] or ".jpg"
+                )
+                uploaded.save(saved)
+                ready = prepare_image(saved)
                 # Narrower than the walk-round photographs at 4.5". A finding
                 # photograph is a detail shot sitting under one line of text,
                 # not a plate.
@@ -259,7 +306,11 @@ def generate_report():
                         docx_path
                     ],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    # Without this a LibreOffice that hangs holds the worker
+                    # until Render kills the whole instance. Two minutes is
+                    # well past any real conversion.
+                    timeout=120,
                 )
 
                 print("[📄] LibreOffice stdout:\n", result.stdout, flush=True)
@@ -301,15 +352,6 @@ def generate_report():
 @app.route('/health')
 def health():
     return {"status": "ok"}
-
-
-@app.route('/check_tectonic')
-def check_tectonic():
-    try:
-        result = subprocess.run(["tectonic", "--version"], capture_output=True, text=True)
-        return {"output": result.stdout.strip()}
-    except Exception as e:
-        return {"error": str(e)}
 
 
 if __name__ == "__main__":
