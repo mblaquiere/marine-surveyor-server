@@ -1,6 +1,10 @@
 services:
   - type: web
-    name: marine-surveyor-server
+    # The service the app actually talks to. kReportEndpoint in
+    # report_service.dart names marine-surveyor-server-1, and this said
+    # marine-surveyor-server -- the duplicate that was deleted on 10 August.
+    # Applying this blueprint under the old name would have made it again.
+    name: marine-surveyor-server-1
     env: python
     buildCommand: "pip install -r requirements.txt"
     # gunicorn, not `python app.py`. That starts the server built into Flask,
