@@ -6,13 +6,55 @@ import hmac
 import re
 import tempfile
 import subprocess
-from flask import Flask, request, send_file
+from flask import Flask, g, request, send_file
+from werkzeug.exceptions import RequestEntityTooLarge
 from docxtpl import DocxTemplate, InlineImage
 from jinja2 import Environment
 from docx.shared import Inches
 from PIL import Image, ImageOps
 
 app = Flask(__name__)
+
+# A report carries every photograph from the walk. The app shrinks each one
+# before sending, so a full survey runs to ten or fifteen megabytes, but nothing
+# stopped a far bigger one arriving and being read whole into the memory of a
+# 512MB instance. Over this it now fails as a plain 413, which the app can put
+# into words, rather than as an instance that runs out of memory and answers
+# 502, which it cannot.
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def _report_too_large(_error):
+    print("[📦] Refused a report over the size limit", flush=True)
+    return {"error": "That report is too large to build."}, 413
+
+
+def _temp_file(suffix):
+    """A temporary file this request will clean up.
+
+    Every photograph used to make one or two of these with delete=False and
+    nothing ever removed them. Render recycles containers often enough that it
+    never showed, which is exactly why it would have shown first on a container
+    that stayed up.
+    """
+    handle, path = tempfile.mkstemp(suffix=suffix)
+    os.close(handle)
+    paths = getattr(g, '_temp_paths', None)
+    if paths is None:
+        paths = []
+        g._temp_paths = paths
+    paths.append(path)
+    return path
+
+
+@app.teardown_request
+def _remove_temp_files(_error):
+    for path in getattr(g, '_temp_paths', []):
+        try:
+            os.remove(path)
+        except OSError as e:
+            print(f"[⚠️] Could not remove {path}: {e}", flush=True)
 
 # Shared secret with the app, sent as the X-Report-Key header on every
 # /generate_report call. Set on Render's dashboard, not committed here -- see
@@ -92,9 +134,9 @@ def prepare_image(path, max_width=1200):
             if upright.mode not in ("RGB", "L"):
                 upright = upright.convert("RGB")
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                upright.save(tmp, format='JPEG', quality=85)
-                return tmp.name
+            prepared = _temp_file(".jpg")
+            upright.save(prepared, format='JPEG', quality=85)
+            return prepared
     except Exception as e:
         print(f"[⚠️] Image prepare failed for {path}: {e}", flush=True)
     return path
@@ -156,9 +198,8 @@ def generate_report():
         if field_name in files:
             print(f"[🖼️] Using uploaded file for {field_name}", flush=True)
             file = files[field_name]
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
-                file.save(tmp.name)
-                temp_path = tmp.name
+            temp_path = _temp_file(os.path.splitext(file.filename)[1])
+            file.save(temp_path)
 
             temp_path = prepare_image(temp_path)
             context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
@@ -176,9 +217,9 @@ def generate_report():
             print(f"[🧬] Decoding base64 for {field_name}", flush=True)
             try:
                 data = base64.b64decode(form[base + '_base64'])
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                    tmp.write(data)
-                    temp_path = tmp.name
+                temp_path = _temp_file(".jpg")
+                with open(temp_path, 'wb') as handle:
+                    handle.write(data)
                 temp_path = prepare_image(temp_path)
                 context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
             except Exception as e:
@@ -210,12 +251,11 @@ def generate_report():
             field = f"{sev}_finding_{n}_photo"
             if field in files:
                 uploaded = files[field]
-                with tempfile.NamedTemporaryFile(
-                    delete=False,
-                    suffix=os.path.splitext(uploaded.filename)[1] or ".jpg",
-                ) as tmp:
-                    uploaded.save(tmp.name)
-                    ready = prepare_image(tmp.name)
+                saved = _temp_file(
+                    os.path.splitext(uploaded.filename)[1] or ".jpg"
+                )
+                uploaded.save(saved)
+                ready = prepare_image(saved)
                 # Narrower than the walk-round photographs at 4.5". A finding
                 # photograph is a detail shot sitting under one line of text,
                 # not a plate.
@@ -259,7 +299,11 @@ def generate_report():
                         docx_path
                     ],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    # Without this a LibreOffice that hangs holds the worker
+                    # until Render kills the whole instance. Two minutes is
+                    # well past any real conversion.
+                    timeout=120,
                 )
 
                 print("[📄] LibreOffice stdout:\n", result.stdout, flush=True)

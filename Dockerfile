@@ -11,5 +11,5 @@ COPY . /app
 RUN pip install --no-cache-dir -r requirements.txt
 
 ENV PORT=10000
-CMD ["python", "app.py"]
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:10000", "--workers", "1", "--threads", "4", "--timeout", "180"]
 

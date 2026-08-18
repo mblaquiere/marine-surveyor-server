@@ -3,7 +3,13 @@ services:
     name: marine-surveyor-server
     env: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python app.py"
+    # gunicorn, not `python app.py`. That starts the server built into Flask,
+    # which handles one request at a time, has no request timeout, and says in
+    # its own documentation not to face the internet with it. One worker rather
+    # than two because a report holds its photographs in memory and the free
+    # instance has 512MB; four threads so a second request waits rather than
+    # being refused.
+    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 180"
     plan: free
     envVars:
       # Shared secret with the app's X-Report-Key header. sync: false means
