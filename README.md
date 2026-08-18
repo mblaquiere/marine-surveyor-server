@@ -74,7 +74,9 @@ placeholders the template really has.
 ## Photographs
 
 Any field named `<name>_photo_path` is stripped by the app and re-sent as an
-uploaded file called `<name>_photo`. Every photograph is turned the right way up
+uploaded file called `<name>_photo`. The server takes the file and nothing else:
+it used to accept `_photo_path` as well and read that path off its own disk,
+which no caller of ours ever needed. Every photograph is turned the right way up
 before it goes in — phones write the pixels sideways and add a tag saying which
 way is up, and Word ignores the tag.
 

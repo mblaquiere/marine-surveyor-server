@@ -63,6 +63,15 @@ def _remove_temp_files(_error):
 # handed all of it to anyone who asked, with nothing to check who was asking.
 REPORT_API_KEY = os.environ.get('REPORT_API_KEY')
 
+# The only two templates this server has. `template` arrives on the form, and
+# without this it went straight into DocxTemplate with nothing checked -- an
+# unvalidated path, behind a key that ships inside every copy of the app. The
+# key is a shared secret at best; this is the part that does not depend on it.
+TEMPLATES = (
+    'survey_template_01a.docx',
+    'survey_template_owner.docx',
+)
+
 
 def _report_key_is_valid(provided):
     """True only if the server has a key configured and it matches.
@@ -163,6 +172,9 @@ def generate_report():
 
     requested_format = form.get("format", "docx").lower()
     template_name = form.get("template", "survey_template_01a.docx")
+    if template_name not in TEMPLATES:
+        print(f"[🚫] Refused unknown template: {template_name!r}", flush=True)
+        return {"error": "Unknown template."}, 400
 
     doc = DocxTemplate(template_name)
 
@@ -176,7 +188,7 @@ def generate_report():
     # beside its text. Named <severity>_finding_<n>_photo.
     FINDING_PHOTO = re.compile(r"^(aa|a|b|c|monitor|ftr)_finding_\d+_photo")
 
-    # Resolve image keys from any of *_photo, *_photo_path, *_base64
+    # Resolve image keys from either of *_photo, *_base64
     image_keys = set()
     for key in list(form.keys()) + list(files.keys()):
         # Findings photographs are handled with their findings, not as
@@ -184,8 +196,12 @@ def generate_report():
         # resized twice, and land in the context under a name no template has.
         if FINDING_PHOTO.match(key):
             continue
-        if key.endswith('_photo') or key.endswith('_photo_path') or key.endswith('_base64'):
-            base = key.replace('_photo', '').replace('_photo_path', '').replace('_base64', '')
+        # No _photo_path here any more. It named a file for the server to read
+        # off its own disk, and the app never sends one -- it strips those and
+        # re-sends each as an uploaded file. So the only caller it could ever
+        # have served was one poking at the endpoint.
+        if key.endswith('_photo') or key.endswith('_base64'):
+            base = key.replace('_photo', '').replace('_base64', '')
             image_keys.add(base)
 
     print(f"[🔎] Found image_keys: {image_keys}", flush=True)
@@ -203,15 +219,6 @@ def generate_report():
 
             temp_path = prepare_image(temp_path)
             context[field_name] = InlineImage(doc, temp_path, width=Inches(4.5))
-
-        elif base + '_photo_path' in form:
-            path = form[base + '_photo_path']
-            print(f"[📄] Using on-disk path for {field_name}: {path}", flush=True)
-            if os.path.exists(path):
-                path = prepare_image(path)
-                context[field_name] = InlineImage(doc, path, width=Inches(4.5))
-            else:
-                print(f"[⚠️] Provided path does not exist: {path}", flush=True)
 
         elif base + '_base64' in form:
             print(f"[🧬] Decoding base64 for {field_name}", flush=True)
@@ -345,15 +352,6 @@ def generate_report():
 @app.route('/health')
 def health():
     return {"status": "ok"}
-
-
-@app.route('/check_tectonic')
-def check_tectonic():
-    try:
-        result = subprocess.run(["tectonic", "--version"], capture_output=True, text=True)
-        return {"output": result.stdout.strip()}
-    except Exception as e:
-        return {"error": str(e)}
 
 
 if __name__ == "__main__":
